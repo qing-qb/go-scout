@@ -1,0 +1,2 @@
+# go-scout
+safe
