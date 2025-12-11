@@ -2,17 +2,21 @@ package scanner
 
 import (
 	"fmt"
+	"go-scout/internal/httpx"
 	"net"
 	"time"
 )
 
 // 扫描结果结构体
+
 type ScanResult struct {
-	Port  int
-	State string //open /close
+	Port   int
+	State  string //open /close
+	Banner string //day 11 新增：服务指纹
 }
 
 // // 端口扫描器的核心函数，现在用 Channel 来接收结果   worker pool;
+
 func StartScan(target string, ports []int, concurrency int, timeout time.Duration) []ScanResult {
 	// 1. 创建任务通道 (jobs) 和结果通道 (results)
 	jobs := make(chan int, concurrency)
@@ -45,10 +49,14 @@ func worker(target string, jobs <-chan int, results chan<- ScanResult, timeout t
 		//调用Day8核心扫描逻辑
 		isOpen := CheckPort(target, port, timeout)
 		State := "close"
+		banner := ""
 		if isOpen {
 			State = "open"
+			banner = httpx.GetWebBanner(target, port)
+			// 🎯 新增逻辑：只有端口开放时，才去探测是不是 Web 服务
+			// 简单的优化：通常只对常见 Web 端口或所有开放端口做这一步
 		}
-		results <- ScanResult{port, State}
+		results <- ScanResult{port, State, banner}
 	}
 
 }

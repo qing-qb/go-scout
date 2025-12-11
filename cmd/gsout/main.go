@@ -81,7 +81,11 @@ func main() {
 	openCount := 0
 	for _, result := range results {
 		if result.State == "open" {
-			fmt.Printf("[+] Port %d is %s\n", result.Port, result.State)
+			if result.Banner != "" {
+				fmt.Printf("[+] Port %d is %s banner is %s\n", result.Port, result.State, result.Banner)
+			} else {
+				fmt.Printf("[+] Port %d is %s\n", result.Port, result.State)
+			}
 			openCount++
 		}
 	}
