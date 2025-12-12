@@ -1,5 +1,6 @@
 package httpx
 
+//GetWebBanner 尝试获取目标端口的Web指纹(server头和Title
 import (
 	"fmt"
 	"net/http"
@@ -12,8 +13,6 @@ import (
 //指纹提取： 提取响应头中的Server字段和HTML中的<title>标签
 
 // banner.go建立HTTP连接并提取信息
-
-//GetWebBanner 尝试获取目标端口的Web指纹(server头和Title
 
 func GetWebBanner(ip string, port int) string {
 

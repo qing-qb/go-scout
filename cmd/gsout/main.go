@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"go-scout/internal/report"
 	"go-scout/internal/scanner"
 	"strconv"
 	"strings"
@@ -12,11 +13,13 @@ import (
 var targetIP *string //测试的IP地址
 var portRange *string
 var concurrency *int
+var outputFile *string //新增输出文件名参数 day12
 
 func init() {
 	targetIP = flag.String("t", "127.0.0.1", "target ip")
 	portRange = flag.String("p", "1-1024", "target port range")
 	concurrency = flag.Int("c", 1000, "concurrency number")
+	outputFile = flag.String("o", "", "output file")
 }
 
 //parsePorts 解析端口范围字符串
@@ -90,4 +93,25 @@ func main() {
 		}
 	}
 	fmt.Printf("总计发现 %d 个开放端口。\n", openCount)
+
+	//day12  导出JSON报告
+	if *outputFile != "" {
+
+		//1,整理数据结构
+		reportData := report.ReportData{
+			Target:     *targetIP,
+			ScanTime:   startTime,
+			Duration:   duration.String(),
+			TotalPorts: len(portsToScan),
+			Results:    results,
+		}
+
+		//2,调用导出函数
+		err := report.ExportJSON(*outputFile, reportData)
+		if err != nil {
+			fmt.Printf("导出失败: %s\n", err)
+		} else {
+			fmt.Printf("[+]报告成功导出：%s\n", *outputFile)
+		}
+	}
 }
