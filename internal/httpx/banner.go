@@ -62,7 +62,7 @@ func GetWebBanner(ip string, port int) string {
 	if serverHeader != "" {
 		bannerParts = append(bannerParts, "Server:"+serverHeader)
 	} else {
-		fmt.Println("lsoe")
+		fmt.Println("lose")
 	}
 	if title != "" {
 		bannerParts = append(bannerParts, "Title:"+strings.TrimSpace(title))

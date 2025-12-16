@@ -1,25 +1,34 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"go-scout/internal/aiagent"
 	"go-scout/internal/report"
 	"go-scout/internal/scanner"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
 var targetIP *string //测试的IP地址
 var portRange *string
 var concurrency *int
-var outputFile *string //新增输出文件名参数 day12
+var outputFile *string  //新增输出文件名参数 day12
+var analyzeFile *string //新增分析文件参数
+var aiKey *string       //新增AL Key参数
 
 func init() {
 	targetIP = flag.String("t", "127.0.0.1", "target ip")
 	portRange = flag.String("p", "1-1024", "target port range")
 	concurrency = flag.Int("c", 1000, "concurrency number")
 	outputFile = flag.String("o", "", "output file")
+	analyzeFile = flag.String("a", "", "analyze file")
+	aiKey = flag.String("key", "os.Getenv(\"OPENAI_API_KEY\")", "AI key")
 }
 
 //parsePorts 解析端口范围字符串
@@ -55,30 +64,76 @@ func parsePorts(portsStr string) ([]int, error) {
 func main() {
 	// 解析命令行参数，必须在所有 flag 定义之后调用
 	flag.Parse()
+
+	tFlagProvided := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "t" {
+			tFlagProvided = true
+		}
+	})
+	//day15 ai纯分析模式
+	if *analyzeFile != "" && !tFlagProvided {
+		if *aiKey == "" {
+			fmt.Println("[!] 错误: 必须提供 API Key 才能使用 AI 分析功能。")
+			return
+		}
+		fmt.Printf("\n--- 🧠 AI 分析报告: %s ---\n", *analyzeFile)
+		aiResult, err := aiagent.AnalyzeReport(*analyzeFile, *aiKey)
+		if err != nil {
+			fmt.Println("[!]AI 分析失败", err)
+		} else {
+			fmt.Println(aiResult)
+		}
+		return
+
+	}
+	//2, 扫描模式
+	if !tFlagProvided {
+		flag.Usage()
+		return
+	}
 	//1,解析端口范围
 	portsToScan, err := parsePorts(*portRange)
 	if err != nil || len(portsToScan) == 0 {
 		fmt.Println("端口范围解析错误，请使用 -h 查看用法。")
 		return
 	}
+	mainCtx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel() // 确保在 main 函数结束时调用 cancel()
 
-	//portsToScan := make([]int, 0)
-	//for i := 1; i <= 1000; i++ {
-	//	portsToScan = append(portsToScan, i)
-	//}
-	//核心 设置并发度
-	//concurrency := 1000
+	//2, day12 信号监听 在新的 Goroutine 中监听 Ctrl+C (SIGINT)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM) //监听中断信号
+	go func() {
+		select {
+		case <-sigCh:
+			fmt.Println("\n[!] 接收到中断信号 (Ctrl+C)。正在优雅停止扫描...")
+			cancel()
+		case <-mainCtx.Done():
+			// 如果是超时导致 Context 结束，这里不会被触发，但这是 Go 惯用写法
+		}
+	}()
+
 	timeout := 500 * time.Millisecond //设置500毫秒超时
 
 	startTime := time.Now()
 	fmt.Printf("开始对 %s 扫描 %d 个端口，并发度：%d...\n", *targetIP, len(portsToScan), *concurrency)
 
-	// 2,调用新的 StartScan 函数(使用命令行解析后的变量)
-	results := scanner.StartScan(*targetIP, portsToScan, *concurrency, timeout)
+	// 2,调用新的 StartScan 函数(使用命令行解析后的变量)  扫描器核心
+	results := scanner.StartScan(mainCtx, *targetIP, portsToScan, *concurrency, timeout)
 
 	duration := time.Since(startTime)
 	fmt.Printf("\n扫描完成，耗时: %s\n", duration)
 
+	//day12 判断扫描是否真正完成
+
+	if mainCtx.Err() == context.DeadlineExceeded {
+		fmt.Printf("\n[!] 扫描超时（超过 5 分钟）！提前中止，已耗时: %s\n", duration)
+	} else if mainCtx.Err() == context.Canceled {
+		fmt.Printf("\n[!] 扫描被用户取消！已耗时: %s\n", duration)
+	} else {
+		fmt.Printf("\n扫描完成，总计耗时: %s\n", duration)
+	}
 	//3, 打印开放端口
 	fmt.Println("\n--- 开放端口列表 ---")
 	openCount := 0
@@ -112,6 +167,19 @@ func main() {
 			fmt.Printf("导出失败: %s\n", err)
 		} else {
 			fmt.Printf("[+]报告成功导出：%s\n", *outputFile)
+		}
+	}
+	if *analyzeFile != "" {
+		if *aiKey == "" {
+			fmt.Println("[!] 错误: 必须提供 API Key 才能使用 AI 分析功能。")
+			return
+		}
+		fmt.Printf("\n--- 🧠 扫描后自动 AI 分析: %s ---\n", *analyzeFile)
+		aiResult, err := aiagent.AnalyzeReport(*analyzeFile, *aiKey)
+		if err != nil {
+			fmt.Println("[!] AI 分析失败:", err)
+		} else {
+			fmt.Println(aiResult)
 		}
 	}
 }
