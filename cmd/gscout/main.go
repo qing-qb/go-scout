@@ -23,12 +23,12 @@ var analyzeFile *string //新增分析文件参数
 var aiKey *string       //新增AL Key参数
 
 func init() {
-	targetIP = flag.String("t", "127.0.0.1", "target ip")
+	targetIP = flag.String("t", "", "target ip")
 	portRange = flag.String("p", "1-1024", "target port range")
 	concurrency = flag.Int("c", 1000, "concurrency number")
 	outputFile = flag.String("o", "", "output file")
 	analyzeFile = flag.String("a", "", "analyze file")
-	aiKey = flag.String("key", "os.Getenv(\"OPENAI_API_KEY\")", "AI key")
+	aiKey = flag.String("key", "", "AI key")
 }
 
 //parsePorts 解析端口范围字符串
@@ -99,7 +99,7 @@ func main() {
 		return
 	}
 	mainCtx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
-	defer cancel() // 确保在 main 函数结束时调用 cancel()
+	defer cancel() // 确保在 main 函数结束时调用 cancel()  回收系统资源 避免多个 Goroutine 无休止地运行，确保程序的稳定性和高效性
 
 	//2, day12 信号监听 在新的 Goroutine 中监听 Ctrl+C (SIGINT)
 	sigCh := make(chan os.Signal, 1)
@@ -149,10 +149,17 @@ func main() {
 	}
 	fmt.Printf("总计发现 %d 个开放端口。\n", openCount)
 
-	//day12  导出JSON报告
+	//day 19 自动化升级
+	var finalReportPath string
 	if *outputFile != "" {
+		finalReportPath = *outputFile
+	} else if *aiKey != "" {
+		timestamp := time.Now().Format("20060102_150405")
+		finalReportPath = fmt.Sprintf("scan_%s_%s.json", *targetIP, timestamp)
+		fmt.Printf("[💡] 自动生成报告文件: %s\n", finalReportPath)
+	}
 
-		//1,整理数据结构
+	if finalReportPath != "" {
 		reportData := report.ReportData{
 			Target:     *targetIP,
 			ScanTime:   startTime,
@@ -161,25 +168,23 @@ func main() {
 			Results:    results,
 		}
 
-		//2,调用导出函数
-		err := report.ExportJSON(*outputFile, reportData)
+		// 先执行导出
+		err := report.ExportJSON(finalReportPath, reportData)
 		if err != nil {
-			fmt.Printf("导出失败: %s\n", err)
+			fmt.Printf("[!] 导出失败: %s\n", err)
 		} else {
-			fmt.Printf("[+]报告成功导出：%s\n", *outputFile)
-		}
-	}
-	if *analyzeFile != "" {
-		if *aiKey == "" {
-			fmt.Println("[!] 错误: 必须提供 API Key 才能使用 AI 分析功能。")
-			return
-		}
-		fmt.Printf("\n--- 🧠 扫描后自动 AI 分析: %s ---\n", *analyzeFile)
-		aiResult, err := aiagent.AnalyzeReport(*analyzeFile, *aiKey)
-		if err != nil {
-			fmt.Println("[!] AI 分析失败:", err)
-		} else {
-			fmt.Println(aiResult)
+			fmt.Printf("[+] 报告成功导出：%s\n", finalReportPath)
+
+			// 只有导出成功了，且有 Key，才紧接着执行 AI 分析
+			if *aiKey != "" {
+				fmt.Printf("\n--- 🧠 自动 AI 分析: %s ---\n", finalReportPath)
+				aiResult, err := aiagent.AnalyzeReport(finalReportPath, *aiKey)
+				if err != nil {
+					fmt.Println("[!] AI 分析失败:", err)
+				} else {
+					fmt.Println(aiResult)
+				}
+			}
 		}
 	}
 }

@@ -3,7 +3,6 @@ package scanner
 import (
 	"context"
 	"fmt"
-	"go-scout/internal/httpx"
 	"net"
 	"time"
 )
@@ -20,8 +19,6 @@ type ScanResult struct {
 
 func StartScan(ctx context.Context, target string, ports []int, concurrency int, timeout time.Duration) []ScanResult {
 
-	//想象一下：你正在扫描一个网络，突然网络连接中断，或者用户发现扫错目标了，按下 Ctrl+C。你的 1000 个 Goroutine 还在后台疯跑，
-	//直到操作系统强制终止，这会浪费资源，甚至造成数据丢失。
 	//📅 Day 13 任务：健壮性与上下文控制 (Context)
 	//在 Go 语言中，解决并发中的超时、取消和生命周期管理，唯一的答案是 context 包
 
@@ -71,22 +68,10 @@ func worker(ctx context.Context, target string, jobs <-chan int, results chan<- 
 		case <-ctx.Done():
 			return
 		default:
-			state := "closed"
-			banner := ""
-
-			//调用Day8核心扫描逻辑CheckPort
-			isOpen := CheckPort(target, port, timeout)
-
-			if isOpen {
-				state = "open"
-				banner = httpx.GetWebBanner(target, port)
-				// 🎯 新增逻辑：只有端口开放时，才去探测是不是 Web 服务
-				// 简单的优化：通常只对常见 Web 端口或所有开放端口做这一步
-			}
-			results <- ScanResult{
+			results <- ScanPort(
+				target,
 				port,
-				state,
-				banner}
+				timeout)
 		}
 
 	}
@@ -98,17 +83,72 @@ func worker(ctx context.Context, target string, jobs <-chan int, results chan<- 
 // timeout: 连接超时时间
 // 返回 true 表示开放，false 表示关闭或超时
 
-func CheckPort(target string, port int, timeout time.Duration) bool {
+func ScanPort(target string, port int, timeout time.Duration) ScanResult {
 	//拼接地址格式为 IP：Port
-	addr := fmt.Sprintf("%s:%d", target, port)
+	address := fmt.Sprintf("%s:%d", target, port)
 	//使用net.DialTimeout尝试建立Tcp连接
 	//"tcp" 是协议类型，address 是目标地址，timeout 是超时时间
-	conn, err := net.DialTimeout("tcp", addr, timeout)
+
+	//  第一步 基础检测 （TCP握手）
+	conn, err := net.DialTimeout("tcp", address, timeout)
 	if err != nil {
 		//连接失败
-		return false
+		return ScanResult{Port: port, State: "closed"}
+	}
+	conn.Close()
+
+	//第二步 ： 获取指纹（day19 的核心功能
+	banner := grabBanner(target, port, timeout)
+	return ScanResult{Port: port, State: "open", Banner: banner}
+
+}
+
+// grabBanner 尝试获取端口指纹（Banner）
+// 策略：先尝试读取（针对 SSH/FTP 等主动服务），如果超时，发送 HTTP 探测包再读取
+//Banner 包含
+
+func grabBanner(ip string, port int, timeout time.Duration) string {
+	address := fmt.Sprintf("%s:%d", ip, port)
+	conn, err := net.DialTimeout("tcp", address, timeout)
+	if err != nil {
+		return ""
 	}
 	defer conn.Close()
-	return true
+	//设置超时
+	readTimeout := 2 * time.Second
+	conn.SetReadDeadline(time.Now().Add(readTimeout))
 
+	//缓冲区
+	buffer := make([]byte, 1024)
+
+	//1,被动模式：先尝试直接读取（适用于SSH, FTP,SMTP)
+	n, err := conn.Read(buffer)
+	if err == nil && n > 0 {
+		return cleanBanner(string(buffer[:n]))
+	}
+
+	//2,主动模式 如果没有读取到数据
+	//发送HTTP HEAD请求
+	httpRequest := "HEAD/HTTP/1.0\r\n\r\n" //\r\n\r\n代表只返回请求头
+	conn.Write([]byte(httpRequest))
+
+	//再次尝试
+	conn.SetReadDeadline(time.Now().Add(readTimeout))
+	n, err = conn.Read(buffer)
+	if err == nil && n > 0 {
+		return cleanBanner(string(buffer[:n]))
+	}
+
+	return "unknown"
+}
+
+// cleanBanner 清理 Banner 字符串中的换行和特殊字符
+
+func cleanBanner(s string) string {
+	// 这里可以加更多过滤逻辑，这里简单处理一下换行
+	// 实际项目中可能需要正则表达式提取 Server: 字段
+	if len(s) > 50 {
+		s = s[:50] + "..."
+	}
+	return fmt.Sprintf("%q", s)
 }

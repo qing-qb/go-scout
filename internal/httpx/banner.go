@@ -26,6 +26,7 @@ func GetWebBanner(ip string, port int) string {
 	//2,创建自定义Client,必须设置超时，防止卡死 Worker(portScan.go)
 	client := &http.Client{
 		Timeout: time.Second * 2,
+
 		// HTTP 请求超时通常比 TCP 连接长一点
 		// 忽略 HTTPS 证书错误 (安全扫描通常需要忽略证书)
 		// Transport: &http.Transport{ TLSClientConfig: &tls.Config{InsecureSkipVerify: true} },
